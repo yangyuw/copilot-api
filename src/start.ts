@@ -9,12 +9,14 @@ import invariant from "tiny-invariant"
 import { ensurePaths } from "./lib/paths"
 import { initProxyFromEnv } from "./lib/proxy"
 import { generateEnvScript } from "./lib/shell"
-import { state } from "./lib/state"
+import { state, type Provider } from "./lib/state"
 import { setupCopilotToken, setupGitHubToken } from "./lib/token"
 import { cacheModels, cacheVSCodeVersion } from "./lib/utils"
 import { server } from "./server"
+import { setupLingmaProvider } from "./services/lingma/provider"
 
 interface RunServerOptions {
+  provider: Provider
   port: number
   verbose: boolean
   accountType: string
@@ -25,6 +27,9 @@ interface RunServerOptions {
   claudeCode: boolean
   showToken: boolean
   proxyEnv: boolean
+  lingmaCacheDir?: string
+  lingmaWsUrl?: string
+  lingmaModels?: string
 }
 
 export async function runServer(options: RunServerOptions): Promise<void> {
@@ -37,8 +42,9 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     consola.info("Verbose logging enabled")
   }
 
+  state.provider = options.provider
   state.accountType = options.accountType
-  if (options.accountType !== "individual") {
+  if (options.provider === "copilot" && options.accountType !== "individual") {
     consola.info(`Using ${options.accountType} plan GitHub account`)
   }
 
@@ -48,17 +54,30 @@ export async function runServer(options: RunServerOptions): Promise<void> {
   state.showToken = options.showToken
 
   await ensurePaths()
-  await cacheVSCodeVersion()
 
-  if (options.githubToken) {
-    state.githubToken = options.githubToken
-    consola.info("Using provided GitHub token")
-  } else {
-    await setupGitHubToken()
+  if (options.provider === "lingma" && options.claudeCode) {
+    throw new Error("--claude-code is only supported by the copilot provider")
   }
 
-  await setupCopilotToken()
-  await cacheModels()
+  if (options.provider === "lingma") {
+    await setupLingmaProvider({
+      cacheDir: options.lingmaCacheDir,
+      wsUrl: options.lingmaWsUrl,
+      models: options.lingmaModels,
+    })
+  } else {
+    await cacheVSCodeVersion()
+
+    if (options.githubToken) {
+      state.githubToken = options.githubToken
+      consola.info("Using provided GitHub token")
+    } else {
+      await setupGitHubToken()
+    }
+
+    await setupCopilotToken()
+    await cacheModels()
+  }
 
   consola.info(
     `Available models: \n${state.models?.data.map((model) => `- ${model.id}`).join("\n")}`,
@@ -110,9 +129,13 @@ export async function runServer(options: RunServerOptions): Promise<void> {
     }
   }
 
-  consola.box(
-    `🌐 Usage Viewer: https://ericc-ch.github.io/copilot-api?endpoint=${serverUrl}/usage`,
-  )
+  if (options.provider === "copilot") {
+    consola.box(
+      `🌐 Usage Viewer: https://ericc-ch.github.io/copilot-api?endpoint=${serverUrl}/usage`,
+    )
+  } else {
+    consola.info(`Lingma OpenAI-compatible endpoint: ${serverUrl}/v1`)
+  }
 
   serve({
     fetch: server.fetch as ServerHandler,
@@ -131,6 +154,11 @@ export const start = defineCommand({
       type: "string",
       default: "4141",
       description: "Port to listen on",
+    },
+    provider: {
+      type: "string",
+      default: "copilot",
+      description: "Provider to use (copilot, lingma)",
     },
     verbose: {
       alias: "v",
@@ -184,6 +212,18 @@ export const start = defineCommand({
       default: false,
       description: "Initialize proxy from environment variables",
     },
+    "lingma-cache-dir": {
+      type: "string",
+      description: "Lingma SharedClientCache directory containing .info.json",
+    },
+    "lingma-ws-url": {
+      type: "string",
+      description: "Override Lingma local JSON-RPC WebSocket URL",
+    },
+    "lingma-models": {
+      type: "string",
+      description: "Comma-separated Lingma model ids to expose",
+    },
   },
   run({ args }) {
     const rateLimitRaw = args["rate-limit"]
@@ -192,6 +232,7 @@ export const start = defineCommand({
       rateLimitRaw === undefined ? undefined : Number.parseInt(rateLimitRaw, 10)
 
     return runServer({
+      provider: parseProvider(args.provider),
       port: Number.parseInt(args.port, 10),
       verbose: args.verbose,
       accountType: args["account-type"],
@@ -202,6 +243,14 @@ export const start = defineCommand({
       claudeCode: args["claude-code"],
       showToken: args["show-token"],
       proxyEnv: args["proxy-env"],
+      lingmaCacheDir: args["lingma-cache-dir"],
+      lingmaWsUrl: args["lingma-ws-url"],
+      lingmaModels: args["lingma-models"],
     })
   },
 })
+
+function parseProvider(value: string): Provider {
+  if (value === "copilot" || value === "lingma") return value
+  throw new Error(`Unsupported provider: ${value}`)
+}

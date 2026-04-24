@@ -1,6 +1,7 @@
 import { Hono } from "hono"
 
-import { forwardError } from "~/lib/error"
+import { APIError, forwardError } from "~/lib/error"
+import { state } from "~/lib/state"
 import {
   createEmbeddings,
   type EmbeddingRequest,
@@ -10,6 +11,14 @@ export const embeddingRoutes = new Hono()
 
 embeddingRoutes.post("/", async (c) => {
   try {
+    if (state.provider === "lingma") {
+      throw new APIError(
+        "Embeddings are not supported by the Lingma provider in V1",
+        501,
+        "unsupported_feature",
+      )
+    }
+
     const paylod = await c.req.json<EmbeddingRequest>()
     const response = await createEmbeddings(paylod)
 

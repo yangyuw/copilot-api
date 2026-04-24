@@ -12,7 +12,7 @@ import {
   createChatCompletions,
   type ChatCompletionResponse,
   type ChatCompletionsPayload,
-} from "~/services/copilot/create-chat-completions"
+} from "~/services/create-chat-completions"
 
 export async function handleCompletion(c: Context) {
   await checkRateLimit(state)

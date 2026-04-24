@@ -12,8 +12,35 @@ export class HTTPError extends Error {
   }
 }
 
+export class APIError extends Error {
+  status: ContentfulStatusCode
+  type: string
+
+  constructor(
+    message: string,
+    status: ContentfulStatusCode = 500,
+    type = "error",
+  ) {
+    super(message)
+    this.status = status
+    this.type = type
+  }
+}
+
 export async function forwardError(c: Context, error: unknown) {
   consola.error("Error occurred:", error)
+
+  if (error instanceof APIError) {
+    return c.json(
+      {
+        error: {
+          message: error.message,
+          type: error.type,
+        },
+      },
+      error.status,
+    )
+  }
 
   if (error instanceof HTTPError) {
     const errorText = await error.response.text()

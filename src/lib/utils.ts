@@ -2,6 +2,10 @@ import consola from "consola"
 
 import { getModels } from "~/services/copilot/get-models"
 import { getVSCodeVersion } from "~/services/get-vscode-version"
+import {
+  createLingmaModels,
+  parseLingmaModelIds,
+} from "~/services/lingma/models"
 
 import { state } from "./state"
 
@@ -16,6 +20,15 @@ export const isNullish = (value: unknown): value is null | undefined =>
 export async function cacheModels(): Promise<void> {
   const models = await getModels()
   state.models = models
+}
+
+export async function cacheProviderModels(): Promise<void> {
+  if (state.provider === "lingma") {
+    state.models = createLingmaModels(parseLingmaModelIds())
+    return
+  }
+
+  await cacheModels()
 }
 
 export const cacheVSCodeVersion = async () => {
